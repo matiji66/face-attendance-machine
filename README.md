@@ -1,4 +1,5 @@
-# face-card-machine
+# Face attendance 
+
 借助 opencv 以及开源的的dlib做一个python版的人脸打卡机器.可以进行人脸识别确认,并记录识别出来的人脸结果.
 
 

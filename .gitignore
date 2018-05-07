@@ -101,5 +101,6 @@ ENV/
 .mypy_cache/
 dataset/*.avi
 dataset/me*/*
+tmp
 
 

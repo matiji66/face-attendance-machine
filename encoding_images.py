@@ -24,23 +24,38 @@ import numpy as np
 # face_recognition.api.face_locations(img, number_of_times_to_upsample=1, model='hog')[source]
 # face_recognition.api.load_image_file(file, mode='RGB')[source]
 
-data_path = "./dataset"
-KNOWN_FACE_ENCODINGS = "./dataset/known_face_encodings.npy"
-KNOWN_FACE_NANE = "./dataset/known_face_name.npy"
+data_path = "./dataset"  # 相关文件保存路径
+KNOWN_FACE_ENCODINGS = "./dataset/known_face_encodings.npy"  # 已知人脸向量
+KNOWN_FACE_NANE = "./dataset/known_face_name.npy"  # 已知人脸名称
 
-known_face_names = []
-known_face_encodings = []
-name_and_encoding = "./dataset/face_encodings"
+new_images = []  # 同时将最新的文件记录
+processd_images = []  # 将已经处理的图片进行保存,在下次启动的时候跳过在该文件中已经出现过的文件,并在程序结束之前与new_images 进行合并然后保存,并覆盖该文件
+known_face_names = []  # 已知人脸名称
+known_face_encodings = []  # 已知人脸编码
+name_and_encoding = "./dataset/face_encodings.txt"
+
+# TODO
+# 图片未必是一次性得到,当处理第二批次的数据时候,只进行增量的数据处理,
+# 然后保存成带有时间戳的npy文件,在加载的时候,将各个子字迹进行合并后返回,
 
 
 def encoding_images(path):
+    """
+    对path路径下的子文件夹中的图片进行编码,
+    TODO:
+        对人脸数据进行历史库中的人脸向量进行欧式距离的比较,当距离小于某个阈值的时候提醒:
+        如果相似的是本人,则跳过该条记录,并提醒已经存在,否则警告人脸过度相似问题,
+
+    :param path:
+    :return:
+    """
     with open(name_and_encoding, 'w') as f:
         subdirs = [os.path.join(path, x) for x in os.listdir(path) if
                    os.path.isdir(os.path.join(path, x))]
         for subdir in subdirs:
-            print('---subdir ', subdir)
+            print('---name :', subdir)
             for y in os.listdir(subdir):
-                print("y is ", y)
+                print("image name is ", y)
                 _image = face_recognition.load_image_file(os.path.join(subdir, y))
                 face_encodings = face_recognition.face_encodings(_image)
                 name = os.path.split(subdir)[-1]
@@ -59,6 +74,10 @@ def encoding_images(path):
 
 
 def load_encodings():
+    """
+    加载保存的历史人脸向量,以及name向量,并返回
+    :return:
+    """
     if not os.path.exists(KNOWN_FACE_NANE) or not os.path.exists(KNOWN_FACE_ENCODINGS):
         encoding_images(data_path)
     return np.load(KNOWN_FACE_ENCODINGS), np.load(KNOWN_FACE_NANE)
@@ -75,8 +94,9 @@ def test_load():
 
 if __name__ == '__main__':
     try:
-        encoding_images(data_path)
+        encoding_images(data_path)  # encoding all images in data_path sub dir
     except Exception as e:
         print("ERROR : create image encoding failed ! ")
 
+    # 测试加载数据库
     test_load()

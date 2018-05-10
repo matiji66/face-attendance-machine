@@ -99,8 +99,9 @@ ENV/
 
 # mypy
 .mypy_cache/
+dataset
+images
 dataset/*.avi
 dataset/me*/*
 tmp
-
-
+*.avi

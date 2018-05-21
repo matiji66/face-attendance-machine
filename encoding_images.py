@@ -6,6 +6,7 @@ import os
 
 import face_recognition
 import numpy as np
+import time
 
 # This is a demo of running face recognition on live video from your webcam. It's a little more complicated than the
 # other example, but it includes some basic performance tweaks to make things run a lot faster:
@@ -24,6 +25,13 @@ import numpy as np
 # face_recognition.api.face_locations(img, number_of_times_to_upsample=1, model='hog')[source]
 # face_recognition.api.load_image_file(file, mode='RGB')[source]
 
+# save im binary format
+# np.array(known_face_encodings).tofile("./dataset/known_face_encodings.bin")
+# np.array(known_face_names).tofile("./dataset/known_face_names.bin")
+# save im numpy format https://www.cnblogs.com/dmir/p/5009075.html
+# np.save(KNOWN_FACE_ENCODINGS, known_face_encodings)
+# np.save(KNOWN_FACE_NANE, known_face_names)
+
 data_path = "./dataset"  # 相关文件保存路径
 KNOWN_FACE_ENCODINGS = "./dataset/known_face_encodings.npy"  # 已知人脸向量
 KNOWN_FACE_NANE = "./dataset/known_face_name.npy"  # 已知人脸名称
@@ -34,12 +42,52 @@ known_face_names = []  # 已知人脸名称
 known_face_encodings = []  # 已知人脸编码
 name_and_encoding = "./dataset/face_encodings.txt"
 
-# TODO
-# 图片未必是一次性得到,当处理第二批次的数据时候,只进行增量的数据处理,
-# 然后保存成带有时间戳的npy文件,在加载的时候,将各个子字迹进行合并后返回,
+image_thread = 0.15
+# TODO  加入多线程,或者是线程池,对每个人的文件采用多线程的处理
 
 
 def encoding_images(path):
+    """
+    对path路径下的子文件夹中的图片进行编码,
+    TODO:
+        对人脸数据进行历史库中的人脸向量进行欧式距离的比较,当距离小于某个阈值的时候提醒:
+        如果相似的是本人,则跳过该条记录,并提醒已经存在,否则警告人脸过度相似问题,
+    :param path:
+    :return:
+    """
+    with open(name_and_encoding, 'w') as f:
+        subdirs = [os.path.join(path, x) for x in os.listdir(path) if os.path.isdir(os.path.join(path, x))]
+        for subdir in subdirs:
+            print('process image name :', subdir)
+            person_image_encoding = []
+            for y in os.listdir(subdir):
+                print("image name is ", y)
+                _image = face_recognition.load_image_file(os.path.join(subdir, y))
+                face_encodings = face_recognition.face_encodings(_image)
+                name = os.path.split(subdir)[-1]
+                if face_encodings and len(face_encodings) == 1:
+                    if len(person_image_encoding) == 0:
+                        person_image_encoding.append(face_encodings[0])
+                        known_face_names.append(name)
+                        continue
+                    for i in range(len(person_image_encoding)):
+                        distances = face_recognition.compare_faces(person_image_encoding, face_encodings[0], tolerance=image_thread)
+                        if False in distances:
+                            person_image_encoding.append(face_encodings[0])
+                            known_face_names.append(name)
+                            print(name, " new feature")
+                            f.write(name + ":" + str(face_encodings[0]) + "\n")
+                            break
+                    # face_encoding = face_recognition.face_encodings(_image)[0]
+                    # face_recognition.compare_faces()
+            known_face_encodings.extend(person_image_encoding)
+            bb = np.array(known_face_encodings)
+            print("--------")
+    np.save(KNOWN_FACE_ENCODINGS, known_face_encodings)
+    np.save(KNOWN_FACE_NANE, known_face_names)
+
+
+def encoding_images_mult_thread(path,threads=8):
     """
     对path路径下的子文件夹中的图片进行编码,
     TODO:
@@ -49,28 +97,95 @@ def encoding_images(path):
     :param path:
     :return:
     """
+    # with open("./dataset/encoded_face_names.txt", 'w') as f:
+    #     lines = f.readlines()
+    #     print(lines)
+
     with open(name_and_encoding, 'w') as f:
-        subdirs = [os.path.join(path, x) for x in os.listdir(path) if
-                   os.path.isdir(os.path.join(path, x))]
+        subdirs = [os.path.join(path, x) for x in os.listdir(path) if os.path.isdir(os.path.join(path, x))]
+        # if
         for subdir in subdirs:
             print('---name :', subdir)
+            person_image_encoding = []
             for y in os.listdir(subdir):
                 print("image name is ", y)
                 _image = face_recognition.load_image_file(os.path.join(subdir, y))
                 face_encodings = face_recognition.face_encodings(_image)
                 name = os.path.split(subdir)[-1]
                 if face_encodings and len(face_encodings) == 1:
-                    face_encoding = face_recognition.face_encodings(_image)[0]
-                    known_face_encodings.append(face_encoding)
-                    known_face_names.append(name)
-                f.write(name + ":" + str(face_encoding) + "\n")
-    # save im binary format
-    # np.array(known_face_encodings).tofile("./dataset/known_face_encodings.bin")
-    # np.array(known_face_names).tofile("./dataset/known_face_names.bin")
+                    if len(person_image_encoding) == 0:
+                        person_image_encoding.append(face_encodings[0])
+                        known_face_names.append(name)
+                        continue
 
-    # save im numpy format https://www.cnblogs.com/dmir/p/5009075.html
+                    for i in range(len(person_image_encoding)):
+                        distances = face_recognition.compare_faces(person_image_encoding, face_encodings[0], tolerance=image_thread)
+                        if False in distances:
+                            person_image_encoding.append(face_encodings[0])
+                            known_face_names.append(name)
+                            print(name, " new feature")
+                            f.write(name + ":" + str(face_encodings[0]) + "\n")
+                            break
+
+                    # face_encoding = face_recognition.face_encodings(_image)[0]
+                    # face_recognition.compare_faces()
+            known_face_encodings.extend(person_image_encoding)
+            bb = np.array(known_face_encodings)
+            print("--------")
+
     np.save(KNOWN_FACE_ENCODINGS, known_face_encodings)
     np.save(KNOWN_FACE_NANE, known_face_names)
+
+
+def encoding_ones_images(name):
+    """
+    对path路径下的子文件夹中的图片进行编码,
+    TODO:
+        对人脸数据进行历史库中的人脸向量进行欧式距离的比较,当距离小于某个阈值的时候提醒:
+        如果相似的是本人,则跳过该条记录,并提醒已经存在,否则警告人脸过度相似问题,
+
+    :param path:
+    :return:
+    """
+    # with open("./dataset/encoded_face_names.txt", 'w') as f:
+    #     lines = f.readlines()
+    #     print(lines)
+
+    with open(name_and_encoding, 'w') as f:
+        image_dirs = os.path.join(data_path, name)
+        files = [os.path.join(image_dirs, x) for x in os.listdir(image_dirs) if os.path.isfile(os.path.join(image_dirs, x))]
+        print('---name :', files)
+        person_image_encoding = []
+        for image_path in files:
+            print("image name is ", image_path)
+            _image = face_recognition.load_image_file(image_path )
+            face_encodings = face_recognition.face_encodings(_image)
+            # name = os.path.split(image_path)[1]
+            if face_encodings and len(face_encodings) == 1:
+                if len(person_image_encoding) == 0:
+                    person_image_encoding.append(face_encodings[0])
+                    known_face_names.append(name)
+                    continue
+
+                for i in range(len(person_image_encoding)):
+                    distances = face_recognition.compare_faces(person_image_encoding, face_encodings[0], tolerance=image_thread)
+                    if False in distances:
+                        person_image_encoding.append(face_encodings[0])
+                        known_face_names.append(name)
+                        print(name, " new feature")
+                        f.write(name + ":" + str(face_encodings[0]) + "\n")
+                        break
+
+                # face_encoding = face_recognition.face_encodings(_image)[0]
+                # face_recognition.compare_faces()
+        known_face_encodings.extend(person_image_encoding)
+        bb = np.array(known_face_encodings)
+        print("--------")
+
+    KNOWN_FACE_ENCODINGS = "./dataset/known_face_encodings_{}.npy"  # 已知人脸向量
+    KNOWN_FACE_NANE = "./dataset/known_face_name_{}.npy"  # 已知人脸名称
+    np.save(KNOWN_FACE_ENCODINGS.format(int(time.time())), known_face_encodings)
+    np.save(KNOWN_FACE_NANE.format(int(time.time())), known_face_names)
 
 
 def load_encodings():
@@ -78,9 +193,24 @@ def load_encodings():
     加载保存的历史人脸向量,以及name向量,并返回
     :return:
     """
+    known_face_encodings = np.load(KNOWN_FACE_ENCODINGS)
+    known_face_names = np.load(KNOWN_FACE_NANE)
     if not os.path.exists(KNOWN_FACE_NANE) or not os.path.exists(KNOWN_FACE_ENCODINGS):
         encoding_images(data_path)
-    return np.load(KNOWN_FACE_ENCODINGS), np.load(KNOWN_FACE_NANE)
+    aa = [file for file in os.listdir(data_path) if os.path.isfile(os.path.join(data_path, file)) and file.endswith("npy")]
+    # ("known_face_encodings_") or file.startswith("known_face_name_"))
+    for data in aa:
+        if data.startswith('known_face_encodings_'):
+            tmp_face_encodings = np.load(os.path.join(data_path,data))
+            known_face_encodings = np.concatenate((known_face_encodings, tmp_face_encodings), axis=0)
+            print("load ", data)
+        elif data.startswith('known_face_name_'):
+            tmp_face_name = np.load(os.path.join(data_path, data))
+            known_face_names = np.concatenate((known_face_names, tmp_face_name), axis=0)
+            print("load ", data)
+        else:
+            print('skip to load original ', data)
+    return known_face_encodings,known_face_names
 
 
 def test_load():
@@ -93,10 +223,12 @@ def test_load():
 
 
 if __name__ == '__main__':
-    try:
-        encoding_images(data_path)  # encoding all images in data_path sub dir
-    except Exception as e:
-        print("ERROR : create image encoding failed ! ")
+    # encoding_images()
+    # encoding_ones_images('jim')
+    # try:
+    #     encoding_images(data_path)  # encoding all images in data_path sub dir
+    # except Exception as e:
+    #     print("ERROR : create image encoding failed ! ")
 
     # 测试加载数据库
     test_load()

@@ -14,10 +14,9 @@ import cv2
 # fourcc = cv2.VideoWriter_fourcc(*'XVID')
 # output_movie = cv2.VideoWriter('output.avi', fourcc, 29.97, (640, 360))
 
-
 import os
 
-files = [path for path in os.listdir("./") if os.path.isfile(path) and path.endswith(".avi")]
+files = [path for path in os.listdir("./videos") if os.path.isfile(path) and path.endswith(".avi")]
 
 frame_number = 0
 for avi in files:
@@ -31,11 +30,9 @@ for avi in files:
         # Quit when the input video file ends
         if not ret:
             break
-
         # Convert the image from BGR color (which OpenCV uses) to RGB color (which face_recognition uses)
         rgb_frame = frame[:, :, ::-1]
         cv2.imwrite("images/image_{}.jpg".format(frame_number), frame)
-
     # All done!
     input_movie.release()
 

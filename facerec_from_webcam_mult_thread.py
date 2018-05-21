@@ -1,16 +1,19 @@
 # !/usr/bin/python3.6
 # -*- coding: utf-8 -*-
 # @author breeze
-
-import time
-
-import cv2
-import face_recognition
-import win32com.client
-
-import encoding_images
-import pandas as pd
 import threading
+import argparse
+import multiprocessing
+import time
+from multiprocessing import Queue, Pool
+
+import face_recognition
+import pandas as pd
+import win32com.client
+import cv2
+import encoding_images
+from app_utils import *
+
 # This is a demo of running face recognition on live video from your webcam. It's a little more complicated than the
 # other example, but it includes some basic performance tweaks to make things run a lot faster:
 #   1. Process each video frame at 1/4 resolution (though still display it at full resolution)
@@ -31,9 +34,6 @@ import threading
 # face_recognition.api.load_image_file(file, mode='RGB')[source]
 
 
-# Get a reference to webcam #0 (the default one)
-video_capture = cv2.VideoCapture(0)
-
 # 语音模块 voice model
 speaker = win32com.client.Dispatch("SAPI.SpVoice")
 
@@ -52,26 +52,27 @@ process_this_frame = True  #
 TIME_DIFF = 20  # 持久化的时间间隔,当设置为 0 时候,每次识别的结果直接进行保存.
 name_record = "./dataset/face_record.txt"  # 持久化识别出的人脸结果
 NAME_DF = pd.DataFrame(known_face_names, columns=["name"])
-
-import datetime
-import time
-
 last_ts = time.time()
+lock = threading.Lock()
 
 
-def myprint(log, ts=time.time()):
-    global last_ts
-    diff = ts - last_ts
-    print(log, '--------', diff)
-    last_ts = ts
+def myprint(log, ts):
+    global lock, last_ts
+    if lock.acquire():
+        diff = ts - last_ts
+        print(log, '--------', diff)
+        last_ts = ts
+        lock.release()
 
 
 def process_face_records(name):
     """
     处理每一条识别的记录 ,并在一定时间之后将数据持久化到文件中
+    此处会碰到全局并发,导致锁的问题
     :param name:
     :return:
     """
+    return
     print('process_face_records start', time.time())
 
     global current_names, last_time
@@ -129,8 +130,14 @@ def vote_class(face_encoding, tolerance=0.3, topN=5):
     return name1, dis1
 
 
-def face_process():
-    myprint("face process start",time.time())
+def face_process(frame):
+    # Resize frame of video to 1/4 size for faster face recognition processing
+    myprint("face process resize start", time.time())
+    small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+    # Convert the image from BGR color (which OpenCV uses) to RGB color (which face_recognition uses)
+    myprint("face process small_frame start", time.time())
+    rgb_small_frame = small_frame[:, :, ::-1]
+
     # Find all the faces and face encodings in the current frame of video
     # face_locations = face_recognition.face_locations(rgb_small_frame, model="cnn")
     myprint('face_locations start', time.time())
@@ -167,31 +174,95 @@ def face_process():
         myprint('process_face_records end', time.time())
 
     # Display the resulting image
-    cv2.imshow('Video', frame)
+    # cv2.imshow('Video', frame)
     myprint("face process end", time.time())
+    return frame
 
 
-while video_capture.isOpened():
-    # Grab a single frame of video
-    ret, frame = video_capture.read()
-    # Resize frame of video to 1/4 size for faster face recognition processing
-    small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+def worker(input_q, output_q):
+    # Load a (frozen) Tensorflow model into memory.
+    fps = FPS().start()
+    while True:
+        myprint("updata start ", time.time())
+        fps.update()
+        myprint("updata end ", time.time())
+        # global lock
+        # if lock.acquire():
+        #    lock.release()
 
-    # Convert the image from BGR color (which OpenCV uses) to RGB color (which face_recognition uses)
-    rgb_small_frame = small_frame[:, :, ::-1]
+        frame = input_q.get()
+        myprint("out queue {} and input que size {} after input_q get".format(output_q.qsize(), input_q.qsize()), time.time())
+        myprint("out queue {} and input que size {} after lock release ".format(output_q.qsize(), input_q.qsize()), time.time())
+        myprint("face process start", time.time())
+        # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        out_frame = face_process(frame)
+        myprint("out queue {} and input que size {}".format(output_q.qsize(), input_q.qsize()), time.time())
+        output_q.put(out_frame)
+        myprint("out queue {} and input que size {} ".format(output_q.qsize(), input_q.qsize()), time.time())
 
-    # Only process every other frame of video to save time
-    if process_this_frame:
-        face_process()
-        # t = threading.Thread(target=face_process, name='face_process')  # 线程对象.
-        # t.start()  # 启动.
+    fps.stop()
 
-    process_this_frame = not process_this_frame
 
-    # Hit 'q' on the keyboard to quit!
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+if __name__ == '__main__':
+    width = 640
+    height = 480
+    num_workers = 3
+    queue_size = 5
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-src', '--source', dest='video_source', type=int,
+                        default=0, help='Device index of the camera.')
+    parser.add_argument('-wd', '--width', dest='width', type=int,
+                        default=width, help='Width of the frames in the video stream.')
+    parser.add_argument('-ht', '--height', dest='height', type=int,
+                        default=height, help='Height of the frames in the video stream.')
+    parser.add_argument('-num-w', '--num-workers', dest='num_workers', type=int,
+                        default=num_workers, help='Number of workers.')
+    parser.add_argument('-q-size', '--queue-size', dest='queue_size', type=int,
+                        default=queue_size, help='Size of the queue.')
 
-# Release handle to the webcam
-video_capture.release()
-cv2.destroyAllWindows()
+    args = parser.parse_args()
+    logger = multiprocessing.log_to_stderr()
+    logger.setLevel(multiprocessing.SUBDEBUG)
+    input_q = Queue(maxsize=args.queue_size)
+    output_q = Queue(maxsize=args.queue_size)
+    pool = Pool(args.num_workers, worker, (input_q, output_q))
+
+    # Get a reference to webcam #0 (the default one)
+    # video_capture = cv2.VideoCapture(0)
+    video_capture = WebcamVideoStream(src=args.video_source,
+                                      width=args.width,
+                                      height=args.height).start()
+    fps = FPS().start()
+
+    # while video_capture.isOpened():
+    while True:
+        # Grab a single frame of video
+        # ret, frame = video_capture.read()
+        myprint("out queue {} and input que size {} video_capture start ".format(output_q.qsize(), input_q.qsize()), time.time())
+        frame = video_capture.read()
+        myprint("out queue {} and input que size {} ".format(output_q.qsize(), input_q.qsize()), time.time())
+        input_q.put(frame)
+        myprint("out queue {} and input que size {} ".format(output_q.qsize(), input_q.qsize()), time.time())
+        # Only process every other frame of video to save time
+        if process_this_frame:
+            # COLOR_RGB2BGR
+            myprint("out queue {} and input que size {} ".format(output_q.qsize(), input_q.qsize()), time.time())
+            cv2.imshow("aa", output_q.get())
+            myprint("out queue {} and input que size {} after imshow ".format(output_q.qsize(), input_q.qsize()),
+                    time.time())
+            # cv2.imshow("aa", frame)
+            fps.update()
+            # face_process(rgb_small_frame)
+            # output_rgb = cv2.cvtColor(output_q.get(), cv2.COLOR_RGB2BGR)
+            # t = threading.Thread(target=face_process, name='face_process')  # 线程对象.
+            # t.start()  # 启动.
+        # process_this_frame = not process_this_frame
+        # Hit 'q' on the keyboard to quit!
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    fps.stop()
+    pool.terminate()
+
+    # Release handle to the webcam
+    video_capture.release()
+    cv2.destroyAllWindows()
